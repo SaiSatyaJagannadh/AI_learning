@@ -334,9 +334,66 @@ registry.register_tool(
 
 Update the mock plan in `tests/test_harness.py` or run with `--mock` after modifying the mock's plan.
 
+## Running in Production with NVIDIA API
+
+The harness includes **full NVIDIA API support** so you can run the agent with real LLMs in production!
+
+**1. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+This installs:
+- `openai` (NVIDIA uses OpenAI-compatible API)
+- `python-dotenv` (for loading .env files)
+- `pytest` (for testing)
+
+**2. Set up your `.env` file:**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your NVIDIA API key:
+```
+NVIDIA_API_KEY=nvapi-your-actual-key-here
+NVIDIA_MODEL=meta/llama-3.1-405b-instruct
+```
+
+Get your NVIDIA API key from: https://build.nvidia.com/
+
+**3. Run with NVIDIA API:**
+```bash
+python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" --nvidia
+```
+
+The agent will use the real NVIDIA API with function calling (tools) to debug the logs!
+
+**Available Models:**
+- `meta/llama-3.1-405b-instruct` (most capable, default)
+- `meta/llama-3.1-70b-instruct` (faster, cheaper)
+- `nvidia/nemotron-4-340b-instruct` (NVIDIA's own model)
+
+**How It Works:**
+
+The `NvidiaClient` in `logagent/llm.py`:
+1. Uses OpenAI SDK with NVIDIA's base URL (`https://integrate.api.nvidia.com/v1`)
+2. Converts our message format to OpenAI format
+3. Converts our tools to OpenAI function calling format
+4. Makes the API call with tool support
+5. Converts the response back to our format
+6. Handles tool calls and returns them to the harness
+
+This is a **production-ready implementation** - not a stub!
+
+**Alternative: Pass API key via command line:**
+```bash
+python cli.py --initial-prompt "Find the root cause" --nvidia --api-key nvapi-your-key --model meta/llama-3.1-70b-instruct
+```
+
 ## Connecting to Real Claude API
 
-The `ClaudeClient` is currently a stub. To implement it:
+The `ClaudeClient` is currently a stub. To implement it, follow a similar pattern to `NvidiaClient` but use the Anthropic SDK:
 
 1. Install the Anthropic SDK:
 ```bash

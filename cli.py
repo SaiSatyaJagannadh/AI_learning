@@ -11,12 +11,16 @@ import argparse
 import sys
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 from logagent.harness import AgentHarness
 from logagent.tools import ToolRegistry
 from logagent.logtools import LogTools
-from logagent.llm import MockClient, ClaudeClient
+from logagent.llm import MockClient, ClaudeClient, NvidiaClient
 from logagent.transcript import Transcript
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def main():
@@ -39,14 +43,19 @@ def main():
         help="Use mock client (no API key needed)",
     )
     parser.add_argument(
+        "--nvidia",
+        action="store_true",
+        help="Use NVIDIA API (requires NVIDIA_API_KEY in .env or --api-key)",
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
-        help="Anthropic API key (if not using --mock)",
+        help="API key (Anthropic or NVIDIA depending on client used)",
     )
     parser.add_argument(
         "--model",
         type=str,
-        help="Model ID for Claude (default: claude-3-5-sonnet-20241022)",
+        help="Model ID (default: claude-3-5-sonnet-20241022 for Claude, meta/llama-3.1-405b-instruct for NVIDIA)",
     )
     parser.add_argument(
         "--max-turns",
@@ -209,13 +218,14 @@ def main():
 
     # Set up LLM client
     if args.mock:
-        llm_client = MockClient(plan=[])  # We'll need to define a plan for the mock
-        # For demonstration, we'll create a simple plan that uses the tools
-        # But we want the mock to be generic for testing; we'll leave it empty and
-        # the mock will just stop immediately. We'll improve this in the test.
-        # Actually, we'll set the plan later in the test.
-        pass
+        llm_client = MockClient(plan=[])  # Empty plan for CLI mock mode
+    elif args.nvidia:
+        # Use NVIDIA API
+        llm_client = NvidiaClient(api_key=args.api_key, model=args.model)
+        # Set tools for function calling
+        llm_client.set_tools(registry.list_tools())
     else:
+        # Use Claude/Anthropic API
         if not args.api_key:
             print("Error: --api-key is required when not using --mock", file=sys.stderr)
             sys.exit(1)
@@ -234,7 +244,10 @@ def main():
     # Run the agent
     print(f"Starting agent with initial prompt: {args.initial_prompt}")
     print(f"Log root: {args.log_root}")
-    print(f"Using {'mock' if args.mock else 'real'} LLM client")
+    client_type = "mock" if args.mock else ("NVIDIA" if args.nvidia else "Claude")
+    print(f"Using {client_type} LLM client")
+    if args.nvidia:
+        print(f"Model: {llm_client.model}")
     result = harness.run(args.initial_prompt)
 
     print("\n" + "="*60)

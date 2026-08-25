@@ -284,3 +284,216 @@ class ClaudeClient(LLMClient):
         stop_sequences: List[str],
     ) -> Dict[str, Any]:
         raise NotImplementedError("ClaudeClient not implemented")
+
+
+class NvidiaClient(LLMClient):
+    """
+    NVIDIA API client using OpenAI-compatible interface.
+
+    NVIDIA provides an OpenAI-compatible API endpoint that works with models
+    like meta/llama-3.1-405b-instruct and nvidia/nemotron-4-340b-instruct.
+
+    The client uses OpenAI SDK with NVIDIA's base URL and supports function calling (tools).
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """
+        Args:
+          api_key: NVIDIA API key. If None, reads from NVIDIA_API_KEY env var.
+          model: Model ID. Default is "meta/llama-3.1-405b-instruct"
+          tools: List of tool schemas in OpenAI format for function calling
+        """
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ImportError(
+                "The 'openai' package is required for NvidiaClient. "
+                "Install it with: pip install openai"
+            )
+
+        self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "NVIDIA API key must be provided via argument or NVIDIA_API_KEY environment variable"
+            )
+
+        # Default to Llama 3.1 405B Instruct
+        self.model = model or os.getenv("NVIDIA_MODEL", "meta/llama-3.1-405b-instruct")
+
+        # Initialize OpenAI client with NVIDIA endpoint
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url="https://integrate.api.nvidia.com/v1"
+        )
+
+        self.tools = tools or []
+
+    def set_tools(self, tools: List[Dict[str, Any]]) -> None:
+        """Update the tools available to the model."""
+        self.tools = tools
+
+    def _convert_messages_to_openai_format(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert our message format to OpenAI format."""
+        openai_messages = []
+
+        for msg in messages:
+            role = msg["role"]
+            content = msg.get("content", [])
+
+            if isinstance(content, str):
+                # Already a string
+                openai_messages.append({"role": role, "content": content})
+            elif isinstance(content, list):
+                # List of content blocks - need to convert
+                text_parts = []
+                tool_calls = []
+
+                for block in content:
+                    block_type = block.get("type")
+
+                    if block_type == "text":
+                        text_parts.append(block.get("text", ""))
+
+                    elif block_type == "tool_use":
+                        # Convert to OpenAI tool_call format
+                        tool_calls.append({
+                            "id": block.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name"),
+                                "arguments": json.dumps(block.get("input", {}))
+                            }
+                        })
+
+                    elif block_type == "tool_result":
+                        # This is a tool result in a user message
+                        # OpenAI expects role="tool" with tool_call_id
+                        tool_result_content = []
+                        for result_block in block.get("content", []):
+                            if result_block.get("type") == "text":
+                                tool_result_content.append(result_block.get("text", ""))
+
+                        openai_messages.append({
+                            "role": "tool",
+                            "tool_call_id": block.get("tool_use_id"),
+                            "content": "\n".join(tool_result_content)
+                        })
+                        continue
+
+                # Add message with text content and/or tool calls
+                if role == "assistant" and tool_calls:
+                    msg_dict = {
+                        "role": role,
+                        "content": "\n".join(text_parts) if text_parts else None,
+                        "tool_calls": tool_calls
+                    }
+                    openai_messages.append(msg_dict)
+                elif text_parts:
+                    openai_messages.append({
+                        "role": role,
+                        "content": "\n".join(text_parts)
+                    })
+
+        return openai_messages
+
+    def _convert_tools_to_openai_format(self) -> List[Dict[str, Any]]:
+        """Convert our tool format to OpenAI function calling format."""
+        openai_tools = []
+
+        for tool in self.tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["parameters"]
+                }
+            })
+
+        return openai_tools
+
+    def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        max_tokens: int,
+        stop_sequences: List[str],
+    ) -> Dict[str, Any]:
+        """
+        Get a completion from NVIDIA API.
+
+        Returns our standard format with stop_reason and content blocks.
+        """
+        # Convert messages to OpenAI format
+        openai_messages = self._convert_messages_to_openai_format(messages)
+
+        # Prepare API call parameters
+        kwargs = {
+            "model": self.model,
+            "messages": openai_messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+        }
+
+        # Add tools if available
+        if self.tools:
+            kwargs["tools"] = self._convert_tools_to_openai_format()
+            kwargs["tool_choice"] = "auto"
+
+        # Add stop sequences if provided
+        if stop_sequences:
+            kwargs["stop"] = stop_sequences
+
+        # Make API call
+        try:
+            response = self.client.chat.completions.create(**kwargs)
+        except Exception as e:
+            raise RuntimeError(f"NVIDIA API call failed: {str(e)}")
+
+        # Convert response to our format
+        message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
+
+        # Build content blocks
+        content_blocks = []
+
+        # Add text content if present
+        if message.content:
+            content_blocks.append({
+                "type": "text",
+                "text": message.content
+            })
+
+        # Add tool calls if present
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                content_blocks.append({
+                    "type": "tool_use",
+                    "id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "input": json.loads(tool_call.function.arguments)
+                })
+
+        # Map finish_reason to our stop_reason
+        stop_reason_map = {
+            "stop": "stop",
+            "length": "max_tokens",
+            "tool_calls": "tool_use",
+            "function_call": "tool_use",
+        }
+        stop_reason = stop_reason_map.get(finish_reason, "stop")
+
+        return {
+            "stop_reason": stop_reason,
+            "content": content_blocks,
+            "usage": {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+            }
+        }

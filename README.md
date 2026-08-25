@@ -64,6 +64,45 @@ You'll see the transcript showing each turn, tool calls, and results. The agent 
 5. Correlate events across logs using the timeline tool
 6. Conclude that a deploy increased the DB pool size, overwhelming the database
 
+## Running with NVIDIA API (Production)
+
+To run the agent with a real LLM (NVIDIA's models via their API):
+
+**1. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+**2. Set up your API key:**
+
+Create a `.env` file (copy from `.env.example`):
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your NVIDIA API key:
+```
+NVIDIA_API_KEY=nvapi-your-actual-key-here
+NVIDIA_MODEL=meta/llama-3.1-405b-instruct
+```
+
+**3. Run the agent:**
+```bash
+python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" --nvidia
+```
+
+The agent will now use NVIDIA's API with the Llama 3.1 405B model (or whatever model you configured) to actually reason through the logs and use tools intelligently.
+
+**Available NVIDIA models:**
+- `meta/llama-3.1-405b-instruct` (default, most capable)
+- `meta/llama-3.1-70b-instruct` (faster, cheaper)
+- `nvidia/nemotron-4-340b-instruct` (NVIDIA's own model)
+
+You can also pass the API key directly via command line:
+```bash
+python cli.py --initial-prompt "Find the root cause" --nvidia --api-key nvapi-your-key
+```
+
 ## What Turns a Loop into a Harness?
 
 The loop above is necessary but not sufficient. A harness adds:

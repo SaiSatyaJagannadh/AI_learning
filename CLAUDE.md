@@ -22,11 +22,17 @@ The harness follows a simple loop pattern in `logagent/harness.py`:
 - **`logagent/harness.py`**: Agent loop with brakes and safety mechanisms. The `AgentHarness.run()` method is the main entry point.
 - **`logagent/tools.py`**: `ToolRegistry` for registering and executing tools. Each tool returns `{"content": [...], "is_error": bool}`.
 - **`logagent/logtools.py`**: Five purpose-built log debugging tools with output clamping and path safety.
-- **`logagent/llm.py`**: LLM client abstraction with `MockClient` (for testing) and `ClaudeClient` (stub for real API).
+- **`logagent/llm.py`**: LLM client abstraction with `MockClient` (for testing), `NvidiaClient` (production-ready), and `ClaudeClient` (stub).
 - **`logagent/transcript.py`**: Verbose logging of every turn, tool call, and result preview.
 - **`cli.py`**: Command-line interface that wires everything together.
 
 ## Development Commands
+
+### Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+Installs: `openai` (for NVIDIA API), `python-dotenv` (for .env), `pytest` (for testing)
 
 ### Generate Sample Logs
 ```bash
@@ -40,17 +46,32 @@ python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" 
 ```
 Runs with `MockClient` - no API key needed. The mock follows a fixed plan of tool calls.
 
+### Run with NVIDIA API (Production)
+```bash
+# Setup: Copy .env.example to .env and add your NVIDIA API key
+cp .env.example .env
+# Edit .env: NVIDIA_API_KEY=nvapi-your-key-here
+
+# Run the agent
+python cli.py --initial-prompt "Why are we seeing 502s?" --nvidia
+```
+Uses NVIDIA's API with models like `meta/llama-3.1-405b-instruct`. The `NvidiaClient` is fully implemented with function calling support.
+
+Available models:
+- `meta/llama-3.1-405b-instruct` (default, most capable)
+- `meta/llama-3.1-70b-instruct` (faster, cheaper)
+- `nvidia/nemotron-4-340b-instruct`
+
+Override model:
+```bash
+python cli.py --initial-prompt "Debug this" --nvidia --model meta/llama-3.1-70b-instruct
+```
+
 ### Run Tests
 ```bash
 python -m pytest tests/test_harness.py -v
 ```
 All tests should pass with no API key and no network traffic.
-
-### Run with Real Claude API (not fully implemented)
-```bash
-python cli.py --initial-prompt "Why are we seeing 502s?" --api-key YOUR_KEY --model claude-3-5-sonnet-20241022
-```
-Note: `ClaudeClient` is a stub that raises `NotImplementedError`. To implement it, use the Anthropic Python SDK with `beta.messages.create` and tools parameter.
 
 ## Tool Design Principles
 
