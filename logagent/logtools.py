@@ -103,8 +103,9 @@ class LogTools:
                 "is_error": True,
             }
         files_arg = args.get("files")  # list of relative paths
-        context_lines = args.get("context_lines", 0)
-        limit = args.get("limit", 100)
+        # Convert to int in case LLM passes strings
+        context_lines = int(args.get("context_lines", 0))
+        limit = int(args.get("limit", 100))
 
         try:
             regex = re.compile(pattern)
@@ -220,10 +221,12 @@ class LogTools:
                 "is_error": True,
             }
 
-        start_line = args.get("start_line", 1)
+        start_line = int(args.get("start_line", 1))
         end_line = args.get("end_line")
         if end_line is None:
             end_line = start_line + 99  # default 100 lines
+        else:
+            end_line = int(end_line)
 
         # Validate line numbers
         if start_line < 1:
@@ -377,7 +380,8 @@ class LogTools:
         files_arg = args.get("files")
         around_str = args.get("around")
         window_str = args.get("window", "00:05:00")
-        limit = args.get("limit", 100)
+        # Convert to int in case LLM passes string
+        limit = int(args.get("limit", 100)) if args.get("limit") is not None else 100
 
         if not files_arg or not isinstance(files_arg, list):
             return {
