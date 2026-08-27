@@ -22,6 +22,19 @@ def _resolve_path(log_root: str, path: str) -> str:
     return full_path
 
 
+# Log lines may carry either an ISO-8601 timestamp ("2026-08-24T10:00:00", what
+# scripts/generate_sample_logs.py emits via .isoformat()) or a space-separated one
+# ("2026-08-24 10:00:00"). Accept both — matching only one silently drops every
+# line of the other kind, which makes timeline and log_stats look empty rather
+# than broken.
+TIMESTAMP_RE = re.compile(r'^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})')
+
+
+def _parse_timestamp(ts_str: str) -> datetime:
+    """Parse a log timestamp in either ISO ('T') or space-separated form."""
+    return datetime.strptime(ts_str.replace('T', ' '), "%Y-%m-%d %H:%M:%S")
+
+
 def _clamp_output(text: str, max_chars: int) -> Tuple[str, bool, int]:
     """Clamp text to max_chars, return (clamped_text, was_truncated, truncated_chars)."""
     if len(text) <= max_chars:
@@ -292,7 +305,7 @@ class LogTools:
         # We'll assume log lines have a timestamp at the start and a level
         # Example: 2026-08-24 10:30:00 ERROR Something went wrong
         # We'll use a regex to extract timestamp and level
-        timestamp_re = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')
+        timestamp_re = TIMESTAMP_RE
         level_re = re.compile(r'\b(ERROR|WARN|INFO|DEBUG)\b')
 
         stats = {
@@ -317,7 +330,7 @@ class LogTools:
                         if ts_match:
                             ts_str = ts_match.group(1)
                             try:
-                                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                                ts = _parse_timestamp(ts_str)
                                 hour_key = ts.strftime("%Y-%m-%d %H")
                             except ValueError:
                                 ts = None
@@ -420,7 +433,7 @@ class LogTools:
         end_ts = around_ts + timedelta(seconds=window_seconds)
 
         # Collect all log lines with timestamps
-        timestamp_re = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')
+        timestamp_re = TIMESTAMP_RE
         entries = []  # (timestamp, file, line_number, line_text)
 
         for rel_file in files_arg:
@@ -445,7 +458,7 @@ class LogTools:
                         if match:
                             ts_str = match.group(1)
                             try:
-                                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                                ts = _parse_timestamp(ts_str)
                                 if start_ts <= ts <= end_ts:
                                     entries.append((ts, rel_file, line_num, line))
                             except ValueError:
