@@ -7,7 +7,7 @@ result. This helps debug the agent loop.
 
 import sys
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 

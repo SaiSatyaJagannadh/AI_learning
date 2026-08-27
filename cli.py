@@ -55,7 +55,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        help="Model ID (default: claude-3-5-sonnet-20241022 for Claude, meta/llama-3.1-405b-instruct for NVIDIA)",
+        help="Model ID (default: claude-3-5-sonnet-20241022 for Claude, meta/llama-3.3-70b-instruct for NVIDIA)",
     )
     parser.add_argument(
         "--max-turns",

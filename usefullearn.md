@@ -357,7 +357,7 @@ cp .env.example .env
 Edit `.env` and add your NVIDIA API key:
 ```
 NVIDIA_API_KEY=nvapi-your-actual-key-here
-NVIDIA_MODEL=meta/llama-3.1-405b-instruct
+NVIDIA_MODEL=meta/llama-3.3-70b-instruct
 ```
 
 Get your NVIDIA API key from: https://build.nvidia.com/
@@ -370,9 +370,9 @@ python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" 
 The agent will use the real NVIDIA API with function calling (tools) to debug the logs!
 
 **Available Models:**
-- `meta/llama-3.1-405b-instruct` (most capable, default)
-- `meta/llama-3.1-70b-instruct` (faster, cheaper)
-- `nvidia/nemotron-4-340b-instruct` (NVIDIA's own model)
+- `meta/llama-3.3-70b-instruct` (default, tested)
+- `meta/llama-3.1-70b-instruct` (older, still available)
+- `nvidia/llama-3.1-nemotron-70b-instruct` (NVIDIA's own model)
 
 **How It Works:**
 

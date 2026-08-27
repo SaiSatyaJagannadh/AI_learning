@@ -169,7 +169,7 @@ Runs **parallel** to the entire flow, logging everything:
 
 ### Core Files
 
-#### 1. **cli.py** (261 lines) - Entry Point
+#### 1. **cli.py** (260 lines) - Entry Point
 **Main function:** `main()`
 
 **What it does:**
@@ -241,7 +241,7 @@ def main():
 
 ---
 
-#### 2. **logagent/harness.py** (252 lines) - The Agent Loop
+#### 2. **logagent/harness.py** (251 lines) - The Agent Loop
 **Main function:** `run(initial_prompt)`
 
 **What it does:**
@@ -326,7 +326,7 @@ def run(self, initial_prompt: str) -> str:
 
 ---
 
-#### 3. **logagent/tools.py** (103 lines) - Tool Registry
+#### 3. **logagent/tools.py** (100 lines) - Tool Registry
 **Main function:** `execute_tool(name, tool_input)`
 
 **What it does:**
@@ -387,7 +387,7 @@ class ToolRegistry:
 
 ---
 
-#### 4. **logagent/logtools.py** (483 lines) - The 5 Tools
+#### 4. **logagent/logtools.py** (479 lines) - The 5 Tools
 **Main functions:** `list_logs()`, `search_logs()`, `read_log()`, `log_stats()`, `timeline()`
 
 **Common pattern for ALL tools:**
@@ -481,7 +481,7 @@ limit = int(args.get("limit", 100))
 
 ---
 
-#### 5. **logagent/llm.py** (470 lines) - LLM Clients
+#### 5. **logagent/llm.py** (498 lines) - LLM Clients
 
 **Three clients:**
 
@@ -502,7 +502,7 @@ Example plan:
   ]
 ```
 
-**B. NvidiaClient** - PRODUCTION (470 lines)
+**B. NvidiaClient** - PRODUCTION (~210 lines)
 ```
 Purpose: Real LLM reasoning with NVIDIA models
 Dependencies: openai SDK, python-dotenv
@@ -545,7 +545,6 @@ Supported models:
   • meta/llama-3.3-70b-instruct (default, tested)
   • meta/llama-3.1-70b-instruct
   • nvidia/llama-3.1-nemotron-70b-instruct
-  • nvidia/nemotron-4-340b-instruct
 ```
 
 **Key code:**
@@ -593,7 +592,7 @@ How to implement: Follow NvidiaClient pattern but use anthropic SDK
 
 ---
 
-#### 6. **logagent/transcript.py** (138 lines) - Verbose Logging
+#### 6. **logagent/transcript.py** (124 lines) - Verbose Logging
 **Main functions:** `log_turn_start()`, `log_assistant_turn()`, `log_tool_call()`, etc.
 
 **What it does:**
@@ -655,7 +654,7 @@ Stop reason: stop
 
 ### Supporting Files
 
-#### 7. **scripts/generate_sample_logs.py** (132 lines) - Log Generator
+#### 7. **scripts/generate_sample_logs.py** (125 lines) - Log Generator
 **Main function:** `main()`
 
 **What it does:**
@@ -695,7 +694,7 @@ The agent's job: Correlate these events and identify the root cause!
 
 ---
 
-#### 8. **tests/test_harness.py** (308 lines) - Test Suite
+#### 8. **tests/test_harness.py** (299 lines) - Test Suite
 **4 test functions:**
 
 **Test 1: `test_harness_brakes_and_verbatim_content()`**
@@ -768,8 +767,9 @@ NVIDIA_MODEL=meta/llama-3.3-70b-instruct
 ```bash
 # Template for .env configuration
 NVIDIA_API_KEY=your_nvidia_api_key_here
-NVIDIA_MODEL=meta/llama-3.1-405b-instruct
-# NVIDIA_MODEL=nvidia/nemotron-4-340b-instruct
+NVIDIA_MODEL=meta/llama-3.3-70b-instruct
+# NVIDIA_MODEL=meta/llama-3.1-70b-instruct
+# NVIDIA_MODEL=nvidia/llama-3.1-nemotron-70b-instruct
 ```
 
 #### 11. **requirements.txt** (dependencies)
@@ -1593,8 +1593,8 @@ A user runs `cli.py` with a prompt about log issues. The CLI loads the NVIDIA AP
 
 **End of Complete Setup and Architecture Document**
 
-**Total Lines:** 2,800+  
-**Total Words:** 21,000+  
-**Completion:** 100%  
+**Total Lines:** ~1,600  
+**Total Words:** ~6,000  
+**Documented source:** 2,136 lines across 9 Python files  
 
 This document covers everything: how it works, how files connect, how data flows, how to deploy to production, and how to troubleshoot issues. Every file explained, every function documented, every connection mapped.

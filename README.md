@@ -83,7 +83,7 @@ cp .env.example .env
 Edit `.env` and add your NVIDIA API key:
 ```
 NVIDIA_API_KEY=nvapi-your-actual-key-here
-NVIDIA_MODEL=meta/llama-3.1-405b-instruct
+NVIDIA_MODEL=meta/llama-3.3-70b-instruct
 ```
 
 **3. Run the agent:**
@@ -91,12 +91,15 @@ NVIDIA_MODEL=meta/llama-3.1-405b-instruct
 python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" --nvidia
 ```
 
-The agent will now use NVIDIA's API with the Llama 3.1 405B model (or whatever model you configured) to actually reason through the logs and use tools intelligently.
+The agent will now use NVIDIA's API with the Llama 3.3 70B model (or whatever model you configured) to actually reason through the logs and use tools intelligently.
 
 **Available NVIDIA models:**
-- `meta/llama-3.1-405b-instruct` (default, most capable)
-- `meta/llama-3.1-70b-instruct` (faster, cheaper)
-- `nvidia/nemotron-4-340b-instruct` (NVIDIA's own model)
+- `meta/llama-3.3-70b-instruct` (default, tested)
+- `meta/llama-3.1-70b-instruct` (older, still available)
+- `nvidia/llama-3.1-nemotron-70b-instruct` (NVIDIA's own model)
+
+If a model name returns a 404, it is no longer served — list what your key can reach
+with `client.models.list()` and update `NVIDIA_MODEL` in `.env`.
 
 You can also pass the API key directly via command line:
 ```bash

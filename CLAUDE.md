@@ -55,12 +55,12 @@ cp .env.example .env
 # Run the agent
 python cli.py --initial-prompt "Why are we seeing 502s?" --nvidia
 ```
-Uses NVIDIA's API with models like `meta/llama-3.1-405b-instruct`. The `NvidiaClient` is fully implemented with function calling support.
+Uses NVIDIA's API with models like `meta/llama-3.3-70b-instruct`. The `NvidiaClient` is fully implemented with function calling support.
 
 Available models:
-- `meta/llama-3.1-405b-instruct` (default, most capable)
-- `meta/llama-3.1-70b-instruct` (faster, cheaper)
-- `nvidia/nemotron-4-340b-instruct`
+- `meta/llama-3.3-70b-instruct` (default, tested)
+- `meta/llama-3.1-70b-instruct` (older, still available)
+- `nvidia/llama-3.1-nemotron-70b-instruct`
 
 Override model:
 ```bash

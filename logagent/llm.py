@@ -291,7 +291,7 @@ class NvidiaClient(LLMClient):
     NVIDIA API client using OpenAI-compatible interface.
 
     NVIDIA provides an OpenAI-compatible API endpoint that works with models
-    like meta/llama-3.1-405b-instruct and nvidia/nemotron-4-340b-instruct.
+    like meta/llama-3.3-70b-instruct and nvidia/llama-3.1-nemotron-70b-instruct.
 
     The client uses OpenAI SDK with NVIDIA's base URL and supports function calling (tools).
     """
@@ -305,7 +305,7 @@ class NvidiaClient(LLMClient):
         """
         Args:
           api_key: NVIDIA API key. If None, reads from NVIDIA_API_KEY env var.
-          model: Model ID. Default is "meta/llama-3.1-405b-instruct"
+          model: Model ID. Default is "meta/llama-3.3-70b-instruct"
           tools: List of tool schemas in OpenAI format for function calling
         """
         try:
@@ -322,8 +322,8 @@ class NvidiaClient(LLMClient):
                 "NVIDIA API key must be provided via argument or NVIDIA_API_KEY environment variable"
             )
 
-        # Default to Llama 3.1 405B Instruct
-        self.model = model or os.getenv("NVIDIA_MODEL", "meta/llama-3.1-405b-instruct")
+        # Default to Llama 3.3 70B Instruct
+        self.model = model or os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
 
         # Initialize OpenAI client with NVIDIA endpoint
         self.client = OpenAI(
