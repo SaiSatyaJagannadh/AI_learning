@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Optional
 from logagent.harness import AgentHarness
 from logagent.llm import LLMClient
 from logagent.logtools import LogTools
+from logagent.skills import SkillLibrary, register_skill_tools
 from logagent.tools import ToolRegistry
 from logagent.transcript import Transcript
 
@@ -50,7 +51,9 @@ from .case import EvalCase, EvalResult, GraderScore, GroundTruth, SuiteReport
 # --------------------------------------------------------------------------
 
 
-def build_registry(log_tools: LogTools) -> ToolRegistry:
+def build_registry(
+    log_tools: LogTools, skills_root: Optional[str] = None
+) -> ToolRegistry:
     """
     Register the five log tools exactly as cli.py does.
 
@@ -185,6 +188,9 @@ def build_registry(log_tools: LogTools) -> ToolRegistry:
         dangerous=False,
     )
 
+    if skills_root:
+        register_skill_tools(registry, SkillLibrary(skills_root=skills_root))
+
     return registry
 
 
@@ -288,10 +294,14 @@ class EvalRunner:
         scenario_dir_factory: Callable[[str], str],
         verbose: bool = False,
         output_char_budget: int = 500,
+        skills_root: Optional[str] = None,
     ):
         self.client_factory = client_factory
         self.scenario_dir_factory = scenario_dir_factory
         self.verbose = verbose
+        # None means "no skill tools registered" - the default, so a case that
+        # scores tool selection is not quietly handed two extra tools.
+        self.skills_root = skills_root
         # Tools clamp their own output to this budget. Keeping it small is part
         # of what the suite tests: an agent that only ever sees clamped output
         # has to compose tools instead of slurping whole files.
@@ -387,7 +397,7 @@ class EvalRunner:
             log_tools = LogTools(
                 log_root=log_root, output_char_budget=self.output_char_budget
             )
-            registry = build_registry(log_tools)
+            registry = build_registry(log_tools, skills_root=self.skills_root)
 
             if case.layer == "tool":
                 # No LLM at all: the case *is* the tool call. Instrumenting the
@@ -437,3 +447,173 @@ class EvalRunner:
             duration_s=time.perf_counter() - started,
             client_label=self._last_client_label,
         )
+
+
+# --------------------------------------------------------------------------
+# CLI: python -m evals.runner
+# --------------------------------------------------------------------------
+#
+# The runner class above is deliberately injection-driven so it can be driven
+# from pytest. This block is the other caller: it wires the two factories to
+# command-line flags and prints a report. Nothing below is imported by the
+# library half - keeping the CLI at the bottom is what stops `import
+# evals.runner` from pulling in argparse, tempfile, and every case module.
+
+
+def _select_cases(all_cases, scenario=None, case_id=None, layer=None):
+    """Filter the case list by the CLI's three narrowing flags."""
+    cases = list(all_cases)
+    if scenario:
+        cases = [c for c in cases if c.scenario == scenario]
+    if layer:
+        cases = [c for c in cases if c.layer == layer]
+    if case_id:
+        cases = [c for c in cases if c.id == case_id]
+    return cases
+
+
+def _make_client_factory(args, tool_schemas):
+    """
+    Build the per-case client factory.
+
+    A case that carries a script always replays it, even under --nvidia: a
+    trajectory case exists to pin the tool sequence, and handing it to a live
+    model would be measuring something else entirely.
+    """
+    from .replay import ScriptedClient
+
+    def factory(case: EvalCase) -> LLMClient:
+        if case.script is not None or args.mock:
+            return ScriptedClient(script=case.script or [])
+        from logagent.llm import NvidiaClient
+
+        client = NvidiaClient(api_key=args.api_key, model=args.model)
+        client.set_tools(tool_schemas)
+        return client
+
+    return factory
+
+
+def _main(argv=None) -> int:
+    import argparse
+    import os
+    import tempfile
+
+    try:  # same .env convention cli.py uses
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    from .cases import ALL_CASES, SKILL_CASES
+    from .report import render_console, write_reports
+    from .scenarios import list_scenarios, materialize
+
+    parser = argparse.ArgumentParser(
+        prog="python -m evals.runner",
+        description="Run the log-agent eval suite.",
+    )
+    parser.add_argument("--mock", action="store_true",
+                        help="Use scripted clients only (no API key needed).")
+    parser.add_argument("--nvidia", action="store_true",
+                        help="Use the NVIDIA API for outcome-layer cases.")
+    parser.add_argument("--model", default=None, help="Override the model id.")
+    parser.add_argument("--api-key", default=None,
+                        help="NVIDIA API key (defaults to $NVIDIA_API_KEY).")
+    parser.add_argument("--scenario", default=None, help="Run only this scenario.")
+    parser.add_argument("--case", dest="case_id", default=None,
+                        help="Run only this case id.")
+    parser.add_argument("--layer", default=None, choices=("tool", "trajectory", "outcome"),
+                        help="Run only this layer.")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Print rationales, transcripts, and per-case detail.")
+    parser.add_argument("--list-cases", action="store_true", help="List case ids and exit.")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="List scenario names and exit.")
+    parser.add_argument("--skills-root", default=None,
+                        help="Register list_skills/load_skill from this directory "
+                             "(e.g. ./skills). Required by the skill-layer cases.")
+    parser.add_argument("--out", default=None,
+                        help="Directory to write console/markdown/json reports into.")
+    parser.add_argument("--keep-logs", action="store_true",
+                        help="Keep the generated scenario logs instead of using a temp dir.")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        for s in list_scenarios():
+            print(f"{s.name:20s} {s.description}")
+        return 0
+
+    if args.list_cases:
+        for c in ALL_CASES:
+            print(f"{c.id:40s} [{c.layer}] {c.scenario}")
+        return 0
+
+    # Neither flag given means scripted - the default has to be the one that
+    # runs with no API key, or CI silently starts costing money.
+    if not args.nvidia:
+        args.mock = True
+
+    cases = _select_cases(ALL_CASES, args.scenario, args.case_id, args.layer)
+
+    # Skill cases need the skill tools registered. Without --skills-root they
+    # would fail on "unknown tool", which is a wiring message dressed up as a
+    # test failure.
+    if not args.skills_root and not args.case_id:
+        skill_ids = {c.id for c in SKILL_CASES}
+        dropped = [c for c in cases if c.id in skill_ids]
+        if dropped:
+            cases = [c for c in cases if c.id not in skill_ids]
+            print(f"skipping {len(dropped)} skill case(s): pass --skills-root ./skills to run them")
+
+    # An outcome case with no script has nothing for a scripted client to
+    # replay - it would answer with no tools and fail by construction. Drop
+    # those under --mock rather than shipping a suite that is red by default,
+    # but only when the user did not ask for them by name.
+    if args.mock and not (args.case_id or args.layer):
+        skipped = [c for c in cases if c.layer == "outcome" and c.script is None]
+        if skipped:
+            cases = [c for c in cases if c not in skipped]
+            print(f"skipping {len(skipped)} live-model outcome case(s) under --mock: "
+                  + ", ".join(c.id for c in skipped) + "\n  (run with --nvidia to score them)")
+
+    if not cases:
+        print("No cases matched the given filters. Try --list-cases.")
+        return 2
+
+    root = (os.path.abspath("eval_logs") if args.keep_logs
+            else tempfile.mkdtemp(prefix="evals_"))
+    dirs = {}
+
+    def scenario_dir_factory(name: str) -> str:
+        # Memoized: five outcome cases over one scenario should read the same
+        # bytes, not five independently generated copies of them.
+        if name not in dirs:
+            dirs[name] = materialize(name, os.path.join(root, name))
+        return dirs[name]
+
+    tool_schemas = []
+    if args.nvidia:
+        probe = build_registry(LogTools(log_root=tempfile.mkdtemp(prefix="evals_probe_")))
+        tool_schemas = probe.list_tools()
+
+    runner = EvalRunner(
+        client_factory=_make_client_factory(args, tool_schemas),
+        scenario_dir_factory=scenario_dir_factory,
+        verbose=args.verbose,
+        skills_root=args.skills_root,
+    )
+    report = runner.run_suite(cases)
+
+    print(render_console(report, verbose=args.verbose))
+    if args.out:
+        for kind, path in write_reports(report, args.out).items():
+            print(f"wrote {kind}: {path}")
+    if args.keep_logs:
+        print(f"scenario logs kept in {root}")
+
+    return 0 if report.failed == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

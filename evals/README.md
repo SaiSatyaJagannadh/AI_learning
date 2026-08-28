@@ -93,7 +93,18 @@ python -m evals.runner --case outcome-cascading_failure --nvidia
 --verbose        Show detailed output including tool calls and results
 --list-cases     List all available case IDs
 --list-scenarios List all available scenarios
+--layer LAYER    Run only tool | trajectory | outcome cases
+--skills-root DIR  Register list_skills/load_skill (required by the skill cases)
+--api-key KEY    NVIDIA key; defaults to $NVIDIA_API_KEY from .env
+--out DIR        Also write results.json and report.md
+--keep-logs      Generate fixtures into ./eval_logs instead of a temp dir
 ```
+
+Exit code is 0 if every case passed, 1 if any failed, 2 if the filters matched
+nothing. Under `--mock` the live-model outcome cases and (without `--skills-root`)
+the skill cases are skipped with a message rather than failing by construction.
+
+Full reference: `COMPLETE_SETUP_EVAL.md`.
 
 ## Understanding Results
 

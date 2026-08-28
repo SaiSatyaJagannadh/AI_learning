@@ -4,7 +4,14 @@ Evaluation cases for the log agent harness.
 
 from .case import EvalCase
 from .scenarios import get_scenario
-from .graders import KeywordGrader, ForbiddenKeywordGrader, ToolTrajectoryGrader, BrakeGrader
+from .graders import (
+    KeywordGrader,
+    ForbiddenKeywordGrader,
+    ToolTrajectoryGrader,
+    ToolOutputGrader,
+    BrakeGrader,
+)
+from .replay import ScriptedClient  # noqa: F401  (scripts below are replayed by it)
 
 
 def make_case(
@@ -19,8 +26,13 @@ def make_case(
     max_turns: int = 8,
     max_tool_calls: int = 12,
     max_output_tokens: int = 4000,
+    graders: list = None,
 ) -> EvalCase:
-    """Helper to create an EvalCase with common defaults."""
+    """Helper to create an EvalCase with common defaults.
+
+    Explicit `graders` are kept as-is; the standard outcome-layer graders are
+    only auto-added when none were supplied, so a case can always opt out.
+    """
     scenario = get_scenario(scenario_name)
     case = EvalCase(
         id=case_id,
@@ -34,11 +46,12 @@ def make_case(
         max_turns=max_turns,
         max_tool_calls=max_tool_calls,
         max_output_tokens=max_output_tokens,
-        graders=[],  # Will be populated below
+        graders=list(graders or []),
     )
 
-    # Add standard graders based on scenario ground truth
-    if layer == "outcome":
+    # Add standard graders based on scenario ground truth, unless the caller
+    # already said exactly how this case should be scored.
+    if layer == "outcome" and not case.graders:
         # Keyword grader for root cause
         case.graders.append(KeywordGrader(
             keywords=scenario.ground_truth.root_cause_keywords
@@ -70,6 +83,12 @@ TOOL_CASES = [
         tool_input={},
         max_turns=1,
         max_tool_calls=1,
+        graders=[
+            ToolOutputGrader(
+                must_contain=["deploy.log", "database.log", "service.log", "gateway.log"],
+                min_lines=4,
+            )
+        ],
     ),
     make_case(
         case_id="tool-read_log",
@@ -85,6 +104,7 @@ TOOL_CASES = [
         },
         max_turns=1,
         max_tool_calls=1,
+        graders=[ToolOutputGrader(must_contain=["deploy.log"], min_lines=5)],
     ),
     make_case(
         case_id="tool-search_logs",
@@ -99,6 +119,11 @@ TOOL_CASES = [
         },
         max_turns=1,
         max_tool_calls=1,
+        graders=[
+            ToolOutputGrader(
+                must_contain=["DB_POOL_SIZE increased from 10 to 100", "10:03:00"],
+            )
+        ],
     ),
     make_case(
         case_id="tool-timeline",
@@ -109,11 +134,21 @@ TOOL_CASES = [
         tool_name="timeline",
         tool_input={
             "files": ["deploy.log", "service.log", "gateway.log", "database.log"],
-            "start_time": "2026-08-24 10:00:00",
-            "end_time": "2026-08-24 10:10:00"
+            "around": "2026-08-24 10:03:00",
+            "window": "00:02:00",
         },
         max_turns=1,
         max_tool_calls=1,
+        # The timestamp-parsing bug this suite exists to catch shows up here:
+        # a timeline that silently returns nothing still "succeeds". Assert on
+        # the merge itself (>1 file, in order), not on any one line - the 500
+        # char output budget clamps the tail away.
+        graders=[
+            ToolOutputGrader(
+                must_contain=["deploy.log", "service.log", "2026-08-24 10:0"],
+                min_lines=3,
+            )
+        ],
     ),
 ]
 
@@ -127,6 +162,30 @@ TRAJECTORY_CASES = [
         rationale="Check that agent uses appropriate tools to investigate cascading failure",
         max_turns=5,
         max_tool_calls=8,
+        script=[
+            {"tools": [{"name": "list_logs", "input": {}}]},
+            {
+                "tools": [
+                    {
+                        "name": "search_logs",
+                        "input": {"pattern": "502", "file": "gateway.log"},
+                    }
+                ]
+            },
+            {
+                "tools": [
+                    {
+                        "name": "timeline",
+                        "input": {
+                            "files": ["deploy.log", "database.log", "gateway.log"],
+                            "around": "2026-08-24 10:03:00",
+                            "window": "00:02:00",
+                        },
+                    }
+                ]
+            },
+            {"text": "The 2.3.0 deploy raised DB_POOL_SIZE from 10 to 100."},
+        ],
         graders=[
             ToolTrajectoryGrader(expected=["search_logs", "timeline"]),
             BrakeGrader(),
@@ -173,8 +232,71 @@ OUTCOME_CASES = [
     ),
 ]
 
+# Skill Layer Cases - the playbooks in ./skills, scored as tools
+#
+# These only run when the runner is given --skills-root; without it the two
+# skill tools are not registered and the cases correctly report an unknown
+# tool. That is deliberate: skills are opt-in, and a case that passed either
+# way would not be testing the wiring.
+SKILL_CASES = [
+    make_case(
+        case_id="tool-list_skills",
+        layer="tool",
+        scenario_name="cascading_failure",
+        prompt="",
+        rationale="The skill index must name every playbook and its trigger",
+        tool_name="list_skills",
+        tool_input={},
+        max_turns=1,
+        max_tool_calls=1,
+        graders=[
+            ToolOutputGrader(
+                must_contain=["cascading-failure", "resource-exhaustion", "load_skill"],
+                min_lines=4,
+            )
+        ],
+    ),
+    make_case(
+        case_id="tool-load_skill",
+        layer="tool",
+        scenario_name="cascading_failure",
+        prompt="",
+        rationale="Loading a playbook must return its procedure, not just its title",
+        tool_name="load_skill",
+        tool_input={"name": "cascading-failure"},
+        max_turns=1,
+        max_tool_calls=1,
+        graders=[ToolOutputGrader(must_contain=["timeline", "first"], min_lines=5)],
+    ),
+    make_case(
+        case_id="tool-load_skill-unknown",
+        layer="tool",
+        scenario_name="cascading_failure",
+        prompt="",
+        rationale="An unknown skill must be an error result that names the alternatives",
+        tool_name="load_skill",
+        tool_input={"name": "no-such-skill"},
+        max_turns=1,
+        max_tool_calls=1,
+        # The negative control: a tool that fails helpfully is what keeps the
+        # agent from burning a turn guessing at names.
+        graders=[
+            ToolOutputGrader(
+                expect_error=True,
+                must_contain=["cascading-failure"],
+            )
+        ],
+    ),
+]
+
 # Combine all cases
-ALL_CASES = TOOL_CASES + TRAJECTORY_CASES + OUTCOME_CASES
+ALL_CASES = TOOL_CASES + SKILL_CASES + TRAJECTORY_CASES + OUTCOME_CASES
 
 # Export for use by runner
-__all__ = ['ALL_CASES', 'TOOL_CASES', 'TRAJECTORY_CASES', 'OUTCOME_CASES']
+__all__ = [
+    'ALL_CASES',
+    'TOOL_CASES',
+    'SKILL_CASES',
+    'TRAJECTORY_CASES',
+    'OUTCOME_CASES',
+]
