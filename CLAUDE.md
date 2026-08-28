@@ -69,9 +69,26 @@ python cli.py --initial-prompt "Debug this" --nvidia --model meta/llama-3.1-70b-
 
 ### Run Tests
 ```bash
-python -m pytest tests/test_harness.py -v
+python -m pytest tests/ -v
 ```
 All tests should pass with no API key and no network traffic.
+
+### Run the Eval Suite
+```bash
+# Scripted regression gate: tool + trajectory layers, no API key
+python -m evals.runner --mock --skills-root ./skills
+
+# Live measurement of the outcome layer
+python -m evals.runner --nvidia --out ./eval_out
+
+python -m evals.runner --list-cases        # discover
+```
+Exits non-zero on failure. Full reference: `COMPLETE_SETUP_EVAL.md`.
+
+### Skills (playbooks)
+`./skills/*/SKILL.md` are markdown playbooks the agent lists and loads on demand via
+the `list_skills` / `load_skill` tools. On by default; `--skills-root ''` disables
+them. Full reference: `COMPLETE_SETUP_SKILL.md`.
 
 ## Tool Design Principles
 
