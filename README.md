@@ -1,4 +1,19 @@
-# Log Agent Harness: A Tutorial
+<div align="center">
+
+# 🔎 Log Agent Harness — Build an AI Agent Loop From Scratch
+
+### A minimal, readable agent that debugs production logs: explicit tool-use loop, safety brakes, skills, and an eval suite.
+
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
+![Anthropic](https://img.shields.io/badge/Anthropic-D97757?style=flat-square&logo=anthropic&logoColor=white)
+![Tool Use](https://img.shields.io/badge/Tool_Use-6C47FF?style=flat-square)
+![Evals](https://img.shields.io/badge/Evals-2EA043?style=flat-square)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white)
+![License-MIT](https://img.shields.io/badge/License--MIT-yellow?style=flat-square)
+
+</div>
+
+---
 
 This repository contains a minimal agent harness for debugging production logs. It's designed to teach you how an agent harness works by favoring clarity over cleverness.
 
@@ -214,3 +229,11 @@ All tests should pass with no API key and no network traffic.
 4. Experiment: change the initial prompt or add your own tool
 
 Happy hacking!
+
+---
+
+<div align="center">
+
+**Built by [Sai Satya Jagannadh Doddipatla (DJ)](https://saisatyajagannadh.github.io/PersonalPortfolio/)** · ⭐ Star the repo if it helped
+
+</div>
