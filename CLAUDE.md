@@ -4,170 +4,161 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a minimal agent harness tutorial for debugging production logs. The harness demonstrates how an agent loop works by making the `while stop_reason == "tool_use"` pattern explicit rather than hiding it behind framework abstractions.
+A teaching implementation of an agent harness for debugging production logs. The
+`while stop_reason == "tool_use"` loop is written out explicitly rather than hidden
+behind a framework, because the loop *is* the lesson. Clarity beats cleverness here:
+when changing code, keep it readable by someone learning the pattern.
 
-The project is designed to teach agent fundamentals through clarity over cleverness.
+Three layers sit on top of each other, and each is documented at length in its own
+`COMPLETE_SETUP_*.md`:
 
-## Core Architecture
+- **harness** (`logagent/`) — the loop, tools, and clients
+- **skills** (`skills/`, `logagent/skills.py`) — markdown playbooks the agent loads on demand
+- **evals** (`evals/`) — a three-layer regression suite over the other two
 
-The harness follows a simple loop pattern in `logagent/harness.py`:
-1. Get completion from LLM
-2. Append assistant's content **verbatim** (preserves thinking blocks)
-3. If stop_reason is "tool_use": execute tools and append results as a single user message
-4. Handle pause_turn and stop conditions
-5. Apply brakes (max_turns, max_tool_calls, max_output_tokens)
+## Commands
 
-### Key Components
-
-- **`logagent/harness.py`**: Agent loop with brakes and safety mechanisms. The `AgentHarness.run()` method is the main entry point.
-- **`logagent/tools.py`**: `ToolRegistry` for registering and executing tools. Each tool returns `{"content": [...], "is_error": bool}`.
-- **`logagent/logtools.py`**: Five purpose-built log debugging tools with output clamping and path safety.
-- **`logagent/llm.py`**: LLM client abstraction with `MockClient` (for testing), `NvidiaClient` (production-ready), and `ClaudeClient` (stub).
-- **`logagent/transcript.py`**: Verbose logging of every turn, tool call, and result preview.
-- **`cli.py`**: Command-line interface that wires everything together.
-
-## Development Commands
-
-### Install Dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt          # openai, python-dotenv, pytest
+python scripts/generate_sample_logs.py   # writes 4 files into ./logs (gitignored)
 ```
-Installs: `openai` (for NVIDIA API), `python-dotenv` (for .env), `pytest` (for testing)
 
-### Generate Sample Logs
+The log generator must run before the CLI or the tool-layer evals; `./logs` is
+excluded by `[Ll]ogs/` in the inherited Visual Studio `.gitignore`, so a fresh
+clone has no logs until you generate them.
+
+### Tests
+
 ```bash
-python scripts/generate_sample_logs.py
+python -m pytest tests/ -q                                   # 14 tests, no key, no network
+python -m pytest tests/test_skills.py -q                     # one file
+python -m pytest tests/test_harness.py::test_name -q         # one test
 ```
-Creates four log files in `./logs` describing a cascading failure scenario (deploy → database → service → gateway).
 
-### Run the Agent (Mock Mode)
+### Evals
+
 ```bash
-python cli.py --initial-prompt "Investigate the 502 errors in the gateway logs" --mock
+python -m evals.runner --mock --skills-root ./skills   # scripted gate: tool + trajectory
+python -m evals.runner --nvidia --out ./eval_out       # adds the live outcome layer
+python -m evals.runner --list-cases
+python -m evals.runner --list-scenarios
+python -m evals.runner --layer tool                    # also: --case ID, --scenario NAME
 ```
-Runs with `MockClient` - no API key needed. The mock follows a fixed plan of tool calls.
 
-### Run with NVIDIA API (Production)
+Exits non-zero on failure. Under `--mock` the five outcome cases are skipped and
+said so explicitly — 8/8 passing there does **not** mean the agent solved anything.
+
+### Running the agent
+
 ```bash
-# Setup: Copy .env.example to .env and add your NVIDIA API key
-cp .env.example .env
-# Edit .env: NVIDIA_API_KEY=nvapi-your-key-here
-
-# Run the agent
+python cli.py --initial-prompt "Why are we seeing 502s?" --mock
 python cli.py --initial-prompt "Why are we seeing 502s?" --nvidia
 ```
-Uses NVIDIA's API with models like `meta/llama-3.3-70b-instruct`. The `NvidiaClient` is fully implemented with function calling support.
 
-Available models:
-- `meta/llama-3.3-70b-instruct` (default, tested)
-- `meta/llama-3.1-70b-instruct` (older, still available)
-- `nvidia/llama-3.1-nemotron-70b-instruct`
+Other flags: `--log-root` (default `./logs`), `--model`, `--api-key`,
+`--max-turns`, `--max-tool-calls`, `--max-output-tokens`, `--skills-root`
+(`''` disables skills), `--no-transcript`.
 
-Override model:
-```bash
-python cli.py --initial-prompt "Debug this" --nvidia --model meta/llama-3.1-70b-instruct
-```
+NVIDIA needs `NVIDIA_API_KEY` in `.env`. Default model `meta/llama-3.3-70b-instruct`;
+`NvidiaClient` is the only fully working live client and reaches the API through the
+`openai` SDK.
 
-### Run Tests
-```bash
-python -m pytest tests/ -v
-```
-All tests should pass with no API key and no network traffic.
+## Architecture
 
-### Run the Eval Suite
-```bash
-# Scripted regression gate: tool + trajectory layers, no API key
-python -m evals.runner --mock --skills-root ./skills
+### The loop (`logagent/harness.py`)
 
-# Live measurement of the outcome layer
-python -m evals.runner --nvidia --out ./eval_out
+`AgentHarness.run()` — defaults `max_turns=10`, `max_tool_calls=20`,
+`max_output_tokens=5000`. Per turn: get a completion, append the assistant's content
+list **verbatim** (preserving thinking blocks), and if `stop_reason == "tool_use"`,
+execute every call and append *all* results as a **single** user message. Splitting
+results across messages is accepted by the API but teaches models to stop batching.
 
-python -m evals.runner --list-cases        # discover
-```
-Exits non-zero on failure. Full reference: `COMPLETE_SETUP_EVAL.md`.
+Messages use Anthropic-style content blocks even when talking to NVIDIA —
+`NvidiaClient` translates at the boundary:
 
-### Skills (playbooks)
-`./skills/*/SKILL.md` are markdown playbooks the agent lists and loads on demand via
-the `list_skills` / `load_skill` tools. On by default; `--skills-root ''` disables
-them. Full reference: `COMPLETE_SETUP_SKILL.md`.
-
-## Tool Design Principles
-
-The five log tools demonstrate important patterns:
-
-1. **Output clamping with honesty**: Tools must clamp output to a character budget and explicitly state what was held back (e.g., "558 matches, showing 12, 546 not shown — narrow your pattern"). Silent truncation makes the LLM reason over incomplete data.
-
-2. **Error results, not exceptions**: Tool failures return `{"content": [...], "is_error": True}` so the LLM learns from failures. Error messages tell the LLM what went wrong AND what to try next.
-
-3. **Compute for the LLM**: The `timeline` tool merges and sorts logs chronologically - hard work done by the tool, not the LLM.
-
-4. **Path safety**: Every file path is resolved and confined to the log root to prevent path traversal attacks.
-
-5. **Composability**: Use `search_logs` to find interesting timestamps, then `timeline` to see the full picture across multiple logs.
-
-## Harness Safety Mechanisms
-
-### Brakes
-- `max_turns`: prevents infinite loops (default: 10)
-- `max_tool_calls`: caps total tool invocations (default: 20)
-- `max_output_tokens`: limits cumulative LLM tokens (default: 5000)
-
-### Dangerous Tools
-- Tools can be marked `dangerous=True` (e.g., file deletion)
-- Requires approval via `approve_hook` before execution
-- If refused, returns an error result (not an exception)
-
-### Content Integrity
-- Assistant's content is appended **verbatim** to preserve thinking blocks
-- Multiple tool calls in one turn are collected into a single user message
-- Tool results are never silently truncated without telling the LLM
-
-## Adding a New Tool
-
-1. Add method to `LogTools` in `logagent/logtools.py`:
-   ```python
-   def your_tool(self, args):
-       # ... implementation ...
-       return {"content": [{"type": "text", "text": result}], "is_error": False}
-   ```
-
-2. Register in `cli.py` using `registry.register_tool()` with name, description, JSON Schema parameters, and function reference.
-
-3. Update mock client test plan in `tests/test_harness.py` if testing with mock.
-
-## Key Implementation Details
-
-### Message Format
-Messages follow Anthropic's format with content blocks:
 ```python
 {"role": "user"|"assistant", "content": [{"type": "text"|"tool_use"|"tool_result", ...}]}
 ```
 
-### Tool Result Format
-Tools must return:
-```python
-{
-    "content": [{"type": "text", "text": "..."}, ...],
-    "is_error": bool  # optional, default False
-}
-```
+Tools return `{"content": [{"type": "text", "text": ...}], "is_error": bool}`.
 
-### MockClient Testing
-The `MockClient` follows a fixed plan but adapts inputs based on previous tool results via `input_adjust` callbacks. Use `mock_client.set_last_tool_result(result)` to feed tool execution results back to the mock.
+### Clients (`logagent/llm.py`)
 
-## When to Use the Anthropic SDK's Tool Runner
+Three subclasses of `LLMClient`, in very different states:
 
-Consider using `ToolRunner` or `agentic_loop` from the Anthropic Python SDK when:
-- You need production-grade reliability (retries, better error handling)
-- You want conversation summarization for complex multi-turn interactions
-- You prefer not to manage the loop yourself
+- **`NvidiaClient`** — complete, with function calling. The production path.
+- **`MockClient`** — takes a `plan` of steps; `input_adjust(prev_result)` callbacks let
+  a step derive arguments from the previous tool result. Feed results back with
+  `set_last_tool_result()`.
+- **`ClaudeClient`** — **a stub that raises `NotImplementedError`.** Traps if you pick
+  it up: `anthropic` is absent from `requirements.txt`; `__init__` raises unless an API
+  key is set; the default model ID is stale; there are ~90 lines of leftover
+  stream-of-consciousness left in a docstring; and `complete` is defined **twice**, so
+  the second definition silently shadows the first. Rewrite it rather than patch it.
 
-This harness is intentionally minimal for teaching purposes. Understanding it first makes you better equipped to use framework solutions later.
+**`--mock` on the CLI passes `MockClient(plan=[])`** (`cli.py:238`). An empty plan
+returns a final answer immediately, so the command above always ends in one turn with
+zero tool calls and "No issues found." That is expected, not a bug — the plan-driven
+mock only gets a real plan in `tests/` and `evals/`. Use the evals, not the CLI, to
+exercise tool use without a key.
 
-## Important Notes
+### Tools (`logagent/tools.py`, `logagent/logtools.py`)
 
-- The harness appends assistant content **verbatim** - thinking blocks survive
-- Multiple tool calls in one turn → single user message with all results
-- Tool output must be clamped with explicit "N items not shown" messages
-- Path traversal protection: all file paths are resolved relative to log_root
-- `ClaudeClient` is a stub - implement it using `anthropic.beta.messages.create` with tools
-- Never silently truncate tool output - always tell the LLM what was omitted
+`registry.register_tool(name, description, parameters, function, dangerous=False)`.
+`LogTools(log_root, output_char_budget=500)` holds the five log tools; `cli.py`
+registers them and sets the schemas.
+
+### Skills (`logagent/skills.py`, `skills/*/SKILL.md`)
+
+Skills are **tools, not prompt injection**. `register_skill_tools()` adds `list_skills`
+and `load_skill`, so the agent spends tokens on a playbook only when it chooses to.
+Each `SKILL.md` is YAML frontmatter (`name`, `description`, `tools`) plus a markdown
+body. Four exist, keyed to incident shapes: cascading-failure, resource-exhaustion,
+expiry-and-config, precision-check.
+
+### Evals (`evals/`)
+
+A pyramid, in `evals/case.py` as `LAYERS = ("tool", "trajectory", "outcome")`:
+
+| Layer | Asks | Client |
+|---|---|---|
+| `tool` | does one tool return the right thing for given args? | none — direct call |
+| `trajectory` | did the agent call the right tools in a sane order? | scripted replay |
+| `outcome` | did it actually find the root cause? | live model only |
+
+`evals/scenarios.py` generates five synthetic incidents into temp log dirs —
+`cascading_failure`, `disk_full`, `memory_leak`, `cert_expiry`, and `red_herring`
+(where the loudest log is a decoy). `scripts/generate_sample_logs.py` only produces
+`cascading_failure`, into `./logs`.
+
+Tool-layer cases cover `list_logs`, `read_log`, `search_logs` and `timeline`; `log_stats` has no case yet.
+
+## Tool design principles
+
+These are the patterns the project exists to demonstrate — preserve them in new tools.
+
+1. **Clamp output, and say so.** `_clamp_output` truncates to a char budget and the
+   tool states what it withheld ("558 matches, showing 12, 546 not shown — narrow your
+   pattern"). Silent truncation makes a model reason confidently over a file it half saw.
+2. **Errors are results, not exceptions.** Return `is_error: True` with a message
+   written *for the model*: what went wrong **and** what to try next.
+3. **Compute for the model.** `timeline` merges and sorts across files because
+   correlating timestamps by hand is what a model is worst at and Python is best at.
+4. **Confine paths.** `_resolve_path` keeps every access inside `log_root`.
+5. **Compose.** `search_logs` finds a timestamp; `timeline` explains it.
+
+## Dangerous tools
+
+Tools registered `dangerous=True` require the harness's approval hook before running.
+A refusal becomes an error result the model can read and adapt to — never an exception.
+No current log tool is dangerous; the mechanism exists so adding a destructive tool
+doesn't require retrofitting permissions.
+
+## Documentation map
+
+`README.md` is the tutorial and the place to start. `GETTING_STARTED.md` walks a first
+run. `usefullearn.md` is the long-form concept guide. The three `COMPLETE_SETUP_*.md`
+files (36–58 KB) are exhaustive per-layer references — consult the one matching the
+layer you're changing. `BUILD_PROMPT.md` is the prompt that regenerates the project.
+`SESSION_SUMMARY.md` is a historical log, not current state; prefer the code over it
+when the two disagree.
